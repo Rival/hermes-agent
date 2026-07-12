@@ -326,6 +326,39 @@ class TurnContext:
     preflight_compression_blocked: bool = False
 
 
+def _compose_pre_persist_returns(user_message, results):
+    """Compose pre_persist_user_message plugin returns into user_message. Pure.
+
+    Order: (1) winning ``user_message`` replace — highest ``data.priority``,
+    ties → first (stable) — sets the body; (2) ``{"context"}`` dicts and bare
+    strings appended raw at the tail (back-compat, unwrapped). A return of
+    ``None`` is ignored.
+    """
+    replaces, raw_tail = [], []
+    for r in results:
+        if isinstance(r, str):
+            if r.strip():
+                raw_tail.append(r)
+            continue
+        if not isinstance(r, dict):
+            continue
+        if r.get("context"):
+            raw_tail.append(str(r["context"]))
+        if r.get("user_message") is not None:
+            replaces.append((int((r.get("data") or {}).get("priority", 0)),
+                             str(r["user_message"])))
+    if replaces:
+        if len(replaces) > 1:
+            logger.warning("pre_persist_user_message: %d user_message "
+                           "replacements; highest priority (ties->first) wins",
+                           len(replaces))
+        replaces.sort(key=lambda t: -t[0])  # stable: ties keep original order
+        user_message = replaces[0][1]
+    if raw_tail:
+        user_message = user_message + "\n\n" + "\n\n".join(raw_tail)
+    return user_message
+
+
 def build_turn_context(
     agent,
     user_message: Any,
@@ -526,6 +559,35 @@ def build_turn_context(
         user_msg = {"role": "user", "content": user_message}
         if isinstance(pending_cli_message, dict):
             agent._pending_cli_user_message = None
+
+    # Plugin hook: pre_persist_user_message — the agent-path ingress seam.
+    # Fire after matching any CLI-staged input, but before appending/persisting
+    # the current turn. Returned fragments therefore reach both the wire and
+    # the durable user row without invalidating the staged-input match above.
+    try:
+        from hermes_cli.lifecycle import invoke_hook as _invoke_hook
+
+        _pp = _invoke_hook(
+            "pre_persist_user_message",
+            session_id=agent.session_id or "",
+            task_id=effective_task_id,
+            turn_id=turn_id,
+            user_message=user_message,
+            conversation_history=list(messages),
+            platform=getattr(agent, "platform", None) or "",
+            sender_id=getattr(agent, "_user_id", None) or "",
+        )
+        user_message = _compose_pre_persist_returns(user_message, _pp)
+        user_msg["content"] = user_message
+        if _pp and persist_user_message is not None and not isinstance(
+            persist_user_message, list
+        ):
+            persist_user_message = _compose_pre_persist_returns(
+                persist_user_message, _pp
+            )
+            agent._persist_user_message_override = persist_user_message
+    except Exception as exc:
+        logger.warning("pre_persist_user_message hook failed: %s", exc)
 
     # Hydrate todo store from conversation history.
     if conversation_history and not agent._todo_store.has_items():
