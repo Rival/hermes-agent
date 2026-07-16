@@ -468,6 +468,10 @@ def build_turn_context(
     agent._persist_user_message_idx = None
     agent._persist_user_message_override = persist_user_message
     agent._persist_user_message_timestamp = persist_user_timestamp
+    # One-shot signal: set by the pre_persist hook below only when its returns
+    # must correct an already-durable staged user row in place (CLI close path).
+    # Reset each turn so a prior turn's flag can never leak forward.
+    agent._persist_user_message_durable_rewrite = None
     # Generate unique task_id if not provided to isolate VMs between tasks.
     effective_task_id = task_id or str(uuid.uuid4())
     agent._current_task_id = effective_task_id
@@ -586,6 +590,13 @@ def build_turn_context(
                 persist_user_message, _pp
             )
             agent._persist_user_message_override = persist_user_message
+            # A CLI close safety-net may already have written and marked this
+            # staged dict. Its normal append-only flush will skip the marker,
+            # so request a one-shot in-place correction of that durable row.
+            from run_agent import _DB_PERSISTED_MARKER
+
+            if user_msg.get(_DB_PERSISTED_MARKER):
+                agent._persist_user_message_durable_rewrite = persist_user_message
     except Exception as exc:
         logger.warning("pre_persist_user_message hook failed: %s", exc)
 
