@@ -4812,6 +4812,65 @@ class TestRunConversation:
         assert len(pre) == 1
         assert pre[0]["request_system"] is None
 
+    def test_live_execution_provenance_reaches_finalize_hooks(self, agent):
+        """Finalize hooks carry one turn-scoped live execution identity."""
+        self._setup_agent(agent)
+        agent.client.chat.completions.create.return_value = _mock_response(
+            content="done", finish_reason="stop"
+        )
+        hook_calls = []
+
+        def _record_hook(name, **kwargs):
+            hook_calls.append((name, kwargs))
+            return []
+
+        with (
+            patch("hermes_cli.plugins.invoke_hook", side_effect=_record_hook),
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            result = agent.run_conversation("hello")
+
+        assert result["final_response"] == "done"
+        post_llm = [kw for name, kw in hook_calls if name == "post_llm_call"]
+        on_end = [kw for name, kw in hook_calls if name == "on_session_end"]
+        assert len(post_llm) == 1
+        assert len(on_end) == 1
+        for kw in (post_llm[0], on_end[0]):
+            assert kw["execution_kind"] == "live"
+            assert kw["execution_id"] is not None
+        assert post_llm[0]["execution_id"] == on_end[0]["execution_id"]
+
+    def test_fork_execution_provenance_reaches_finalize_hooks(self, agent):
+        """Finalize hooks preserve background-review fork provenance."""
+        self._setup_agent(agent)
+        agent._execution_kind = "background_review"
+        agent._execution_id = "FORK-EXEC-ID-123"
+        agent.client.chat.completions.create.return_value = _mock_response(
+            content="done", finish_reason="stop"
+        )
+        hook_calls = []
+
+        def _record_hook(name, **kwargs):
+            hook_calls.append((name, kwargs))
+            return []
+
+        with (
+            patch("hermes_cli.plugins.invoke_hook", side_effect=_record_hook),
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            agent.run_conversation("hello")
+
+        post_llm = [kw for name, kw in hook_calls if name == "post_llm_call"]
+        on_end = [kw for name, kw in hook_calls if name == "on_session_end"]
+        assert len(post_llm) == 1 and len(on_end) == 1
+        for kw in (post_llm[0], on_end[0]):
+            assert kw["execution_kind"] == "background_review"
+            assert kw["execution_id"] == "FORK-EXEC-ID-123"
+
     def test_api_request_error_hook_skips_payload_work_without_listener(self, agent, monkeypatch):
         payload_built = False
         hook_called = False
