@@ -587,6 +587,13 @@ def build_turn_context(
         if isinstance(pending_cli_message, dict):
             agent._pending_cli_user_message = None
 
+    # Preserve the raw user turn for later observability/hooks. The ingress
+    # hook below may rewrite the durable/API-facing message, but its injected
+    # context must not become the reported original input.
+    original_user_message = (
+        persist_user_message if persist_user_message is not None else user_message
+    )
+
     # Plugin hook: pre_persist_user_message — the agent-path ingress seam.
     # Fire after matching any CLI-staged input, but before appending/persisting
     # the current turn. Returned fragments therefore reach both the wire and
@@ -689,9 +696,6 @@ def build_turn_context(
     think_scrubber = getattr(agent, "_stream_think_scrubber", None)
     if think_scrubber is not None:
         think_scrubber.reset()
-
-    # Preserve the original user message (no nudge injection).
-    original_user_message = persist_user_message if persist_user_message is not None else user_message
 
     # Track memory nudge trigger (turn-based, checked here).
     should_review_memory = False

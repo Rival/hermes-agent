@@ -141,6 +141,9 @@ def test_pre_persist_returns_reach_durable_row_on_early_persist(tmp_path, monkey
     # The live prompt carries the injection this turn.
     assert worker.messages[-1] is staged
     assert worker.messages[-1]["content"] == "new prompt\n\n[Mem] recall"
+    # Later observability/hooks still receive the user's raw turn, not the
+    # durable injection produced by this ingress seam.
+    assert worker.original_user_message == "new prompt"
 
     # The durable row carries it too — the whole point of a *pre_persist* hook.
     stored = db.get_messages_as_conversation(session_id)
