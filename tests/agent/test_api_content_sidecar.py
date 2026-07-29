@@ -284,7 +284,9 @@ class TestPrologueStamping:
         agent = _FakeAgent()
         with patch(
             "hermes_cli.plugins.invoke_hook",
-            return_value=[{"context": "PLUGIN-CTX"}],
+            side_effect=lambda hook, **_kw: (
+                [{"context": "PLUGIN-CTX"}] if hook == "pre_llm_call" else []
+            ),
         ):
             ctx = _build(agent)
         msg = ctx.messages[ctx.current_turn_user_idx]
@@ -310,7 +312,9 @@ class TestPrologueStamping:
         agent.api_mode = "codex_app_server"
         with patch(
             "hermes_cli.plugins.invoke_hook",
-            return_value=[{"context": "PLUGIN-CTX"}],
+            side_effect=lambda hook, **_kw: (
+                [{"context": "PLUGIN-CTX"}] if hook == "pre_llm_call" else []
+            ),
         ):
             ctx = _build(agent)
         assert "api_content" not in ctx.messages[ctx.current_turn_user_idx]
@@ -635,7 +639,9 @@ class TestPrologueMoaAndInPlaceBackfill:
         agent = _FakeAgent()
         with patch(
             "hermes_cli.plugins.invoke_hook",
-            return_value=[{"context": "PLUGIN-CTX"}],
+            side_effect=lambda hook, **_kw: (
+                [{"context": "PLUGIN-CTX"}] if hook == "pre_llm_call" else []
+            ),
         ):
             ctx = _build(agent, moa_active=True)
         assert "api_content" not in ctx.messages[ctx.current_turn_user_idx]
@@ -688,7 +694,9 @@ class TestPrologueMoaAndInPlaceBackfill:
         ]
         with patch(
             "hermes_cli.plugins.invoke_hook",
-            return_value=[{"context": "PLUGIN-CTX"}],
+            side_effect=lambda hook, **_kw: (
+                [{"context": "PLUGIN-CTX"}] if hook == "pre_llm_call" else []
+            ),
         ):
             ctx = _build(agent, conversation_history=history)
 
